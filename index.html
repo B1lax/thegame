@@ -521,11 +521,11 @@ function cmdLook() {
 function cmdGo(dir) {
   const dirMap = { n:"north", s:"south", e:"east", w:"west", u:"up", d:"down" };
   const full = dirMap[dir] || dir;
-  if (!full) { pr("Go where?", "warn"); return; }
+  if (!full) { pr("Go where?", "warn"); return false; }
 
   const exits = rooms[gs.room].exits;
   const dest = exits[full];
-  if (!dest) { pr("You can't go that way.", "warn"); return; }
+  if (!dest) { pr("You can't go that way.", "warn"); return false; }
 
   if (dest === "_front_door") {
     if (gs.inv.includes("key")) {
@@ -533,7 +533,7 @@ function cmdGo(dir) {
     } else {
       pr("The front door is locked. You need a key to open it.", "warn");
     }
-    return;
+    return true;
   }
 
   // Player walked into Bilax's room — instant death
@@ -541,7 +541,7 @@ function cmdGo(dir) {
     gs.room = dest;
     pr("You step into the " + rooms[dest].name + " — Bilax is right there.", "danger");
     caught();
-    return;
+    return true;
   }
 
   gs.room = dest;
@@ -549,6 +549,7 @@ function cmdGo(dir) {
   gs.listenSafe = false;
   gs.bilaxEntering = false;
   describeRoom(gs.room);
+  return true;
 }
 
 function cmdSearch() {
@@ -660,7 +661,6 @@ function cmdTake(item) {
     return;
   }
   const r = rooms[gs.room];
-  const vis = visibleItems(gs.room);
 
   if (!r.items.includes(item)) {
     pr("There's no " + item + " here.", "warn");
@@ -789,13 +789,13 @@ function dispatch(raw) {
     case "read":                      cmdRead(args);     break;
     case "restart":                   startGame();       return;
     case "go":    case "move":
-    case "walk":  case "run":         cmdGo(args);       break;
-    case "north": case "n":           cmdGo("north");    break;
-    case "south": case "s":           cmdGo("south");    break;
-    case "east":  case "e":           cmdGo("east");     break;
-    case "west":  case "w":           cmdGo("west");     break;
-    case "up":    case "u":           cmdGo("up");       break;
-    case "down":  case "d":           cmdGo("down");     break;
+    case "walk":  case "run":         if (!cmdGo(args))    { gs.turn--; return; } break;
+    case "north": case "n":           if (!cmdGo("north")) { gs.turn--; return; } break;
+    case "south": case "s":           if (!cmdGo("south")) { gs.turn--; return; } break;
+    case "east":  case "e":           if (!cmdGo("east"))  { gs.turn--; return; } break;
+    case "west":  case "w":           if (!cmdGo("west"))  { gs.turn--; return; } break;
+    case "up":    case "u":           if (!cmdGo("up"))    { gs.turn--; return; } break;
+    case "down":  case "d":           if (!cmdGo("down"))  { gs.turn--; return; } break;
     default:
       pr("Unknown command. Type HELP for a list of commands.", "warn");
       gs.turn--;
