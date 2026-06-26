@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>BILAX 1.2 — Terminal Adventure</title>
+  <title>BILAX 1.3 — Terminal Adventure</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -365,6 +365,12 @@ function moveBilax(extraForbidden = null) {
     if (elsewhere.length) gs.bilax = elsewhere[Math.floor(Math.random() * elsewhere.length)];
   }
 
+  // Safety net: if Bilax is still in a forbidden room after either branch, force him out
+  if (forbidSet.has(gs.bilax)) {
+    const safe = bilaxNeighbors().filter(r => !forbidSet.has(r));
+    if (safe.length) gs.bilax = safe[Math.floor(Math.random() * safe.length)];
+  }
+
   return prevRoom !== gs.bilax && gs.bilax === gs.room;
 }
 
@@ -462,8 +468,7 @@ function checkBilaxEncounter(bilaxJustMoved) {
       pr("Bilax looms over your hiding spot... and moves on.", "warn");
       const elsewhere = bilaxNeighbors().filter(r => r !== gs.room);
       if (elsewhere.length) gs.bilax = elsewhere[Math.floor(Math.random() * elsewhere.length)];
-      else gs.bilax = bilaxNeighbors()[0] || gs.bilax;
-      pr("You hear heavy footsteps recede toward the " + rooms[gs.bilax].name + ".", "warn");
+      pr("You hear heavy footsteps recede.", "warn");
       return true;
     }
     // Didn't hide or flee — caught
@@ -479,8 +484,7 @@ function checkBilaxEncounter(bilaxJustMoved) {
     pr("He sniffs the air and shuffles on.", "warn");
     const elsewhere = bilaxNeighbors().filter(r => r !== gs.room);
     if (elsewhere.length) gs.bilax = elsewhere[Math.floor(Math.random() * elsewhere.length)];
-    else gs.bilax = bilaxNeighbors()[0] || gs.bilax;
-    pr("You hear heavy footsteps recede toward the " + rooms[gs.bilax].name + ".", "warn");
+    pr("You hear heavy footsteps recede.", "warn");
     return true;
   }
 
@@ -543,11 +547,14 @@ function cmdGo(dir) {
     return true;
   }
 
-  // Player walked into Bilax's room — instant death
+  // Player walked into Bilax's room — grace turn (player had no way to know)
   if (gs.bilax === dest) {
     gs.room = dest;
-    pr("You step into the " + rooms[dest].name + " — Bilax is right there.", "danger");
-    caught();
+    gs.hiding = false;
+    gs.bilaxEntering = true;
+    pr("You step into the " + rooms[dest].name + " — BILAX IS RIGHT HERE.", "danger");
+    pr("HIDE or FLEE — now!", "danger");
+    describeRoom(gs.room);
     return true;
   }
 
@@ -867,7 +874,7 @@ document.addEventListener("click", () => cmdInput.focus());
 function printIntro() {
   pr("╔══════════════════════════════════════════════════╗", "title");
   pr("║                                                  ║", "title");
-  pr("║   B  I  L  A  X  1.2  —  A Terminal Adventure   ║", "title");
+  pr("║   B  I  L  A  X  1.3  —  A Terminal Adventure   ║", "title");
   pr("║                                                  ║", "title");
   pr("╚══════════════════════════════════════════════════╝", "title");
   prBlank();
