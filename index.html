@@ -141,6 +141,12 @@
       caret-color: #00ff66;
     }
 
+    #cmdInput::placeholder {
+      color: #115522;
+      letter-spacing: 1px;
+      animation: blink 1.2s step-end infinite;
+    }
+
     /* Blinking cursor */
     @keyframes blink { 0%,49%{opacity:1} 50%,100%{opacity:0} }
     #cmdInput:focus + .cursor { display: none; }
@@ -175,6 +181,47 @@
 </div>
 
 <script>
+// ─── Line-by-line print queue ─────────────────────────────────────────────────
+
+const output    = document.getElementById("output");
+const outputArea = document.getElementById("outputArea");
+
+let printQueue   = [];
+let queueRunning = false;
+let lineDelay    = 70;   // ms between lines; changed per phase
+
+function flushQueue() {
+  // Instantly dump everything remaining (used when player types while printing)
+  while (printQueue.length) {
+    const { text, cls } = printQueue.shift();
+    _appendLine(text, cls);
+  }
+  queueRunning = false;
+}
+
+function _appendLine(text, cls) {
+  const el = document.createElement("span");
+  el.className = "line" + (cls ? " " + cls : "");
+  el.textContent = text + "\n";
+  output.appendChild(el);
+  outputArea.scrollTop = outputArea.scrollHeight;
+}
+
+function _drainQueue() {
+  if (!printQueue.length) { queueRunning = false; return; }
+  const { text, cls } = printQueue.shift();
+  _appendLine(text, cls);
+  setTimeout(_drainQueue, lineDelay);
+}
+
+function pr(text = "", cls = "") {
+  printQueue.push({ text, cls });
+  if (!queueRunning) { queueRunning = true; setTimeout(_drainQueue, lineDelay); }
+}
+
+function prBlank() { pr(); }
+function prRule()  { pr("─".repeat(52), "dim"); }
+
 // ─── Room definitions ──────────────────────────────────────────────────────────
 
 const ROOM_DEFS = {
@@ -311,25 +358,6 @@ function checkEncounter() {
   if (gs.bilax !== gs.room) return "safe";
   if (gs.hiding && Math.random() < 0.80) return "hiding_safe";
   return "caught";
-}
-
-// ─── Output helpers ───────────────────────────────────────────────────────────
-
-const output = document.getElementById("output");
-const outputArea = document.getElementById("outputArea");
-
-function pr(text = "", cls = "") {
-  const el = document.createElement("span");
-  el.className = "line" + (cls ? " " + cls : "");
-  el.textContent = text + "\n";
-  output.appendChild(el);
-  outputArea.scrollTop = outputArea.scrollHeight;
-}
-
-function prBlank() { pr(); }
-
-function prRule() {
-  pr("─".repeat(52), "dim");
 }
 
 // ─── Room display ─────────────────────────────────────────────────────────────
@@ -617,10 +645,14 @@ function cmdRead(item) {
 const cmdInput = document.getElementById("cmdInput");
 const history  = [];
 let histIdx    = -1;
+let booted     = false;   // true after the player first presses Enter
 
 function dispatch(raw) {
   const input = raw.trim().toLowerCase();
   if (!input) return;
+
+  // Flush any still-printing text so the echo appears at the right place
+  flushQueue();
 
   pr("> " + raw, "echo");
 
@@ -632,8 +664,10 @@ function dispatch(raw) {
 
   const [cmd, ...rest] = input.split(/\s+/);
   const args = rest.join(" ");
-  gs.hiding = false;  // reset hiding on each action (set again by HIDE cmd)
+  gs.hiding = false;
   gs.turn++;
+
+  lineDelay = 30;  // gameplay lines roll faster than intro
 
   switch (cmd) {
     case "help":  case "?":           cmdHelp();         break;
@@ -666,11 +700,28 @@ function dispatch(raw) {
 
 cmdInput.addEventListener("keydown", e => {
   if (e.key === "Enter") {
+    // ── Boot gate ──────────────────────────────────────────
+    if (!booted) {
+      booted = true;
+      cmdInput.placeholder = "";
+      lineDelay = 70;
+      startGame();
+      return;
+    }
+
+    // ── If text is still rolling, flush it instantly ───────
+    if (queueRunning) {
+      flushQueue();
+      return;
+    }
+
+    // ── Normal command dispatch ────────────────────────────
     const val = cmdInput.value;
     if (val.trim()) { history.unshift(val); if (history.length > 80) history.pop(); }
     histIdx = -1;
     cmdInput.value = "";
     dispatch(val);
+
   } else if (e.key === "ArrowUp") {
     e.preventDefault();
     if (histIdx < history.length - 1) cmdInput.value = history[++histIdx];
@@ -706,12 +757,17 @@ function printIntro() {
 
 function startGame() {
   output.innerHTML = "";
+  printQueue = [];
+  queueRunning = false;
   newGame();
+  lineDelay = 70;
   printIntro();
   describeRoom(gs.room);
 }
 
-startGame();
+// ── On page load: blank screen, wait for Enter ────────────────────────────────
+cmdInput.placeholder = "PRESS  ENTER  TO  BEGIN";
+cmdInput.focus();
 </script>
 </body>
 </html>
