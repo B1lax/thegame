@@ -336,7 +336,7 @@ function newGame() {
     bilax:         "hallway",
     turn:          0,
     hideStreak:    0,      // consecutive HIDE commands; resets on any other action
-    listenSafe:    false,  // true after LISTEN says "somewhere else" — next move guaranteed safe
+    listenSafe:    false,  // true after any LISTEN — next move destination is forbidden for Bilax
     bilaxEntering: false   // true = Bilax walked INTO player's room this turn; 1-turn grace
   };
 }
@@ -708,7 +708,7 @@ function cmdListen() {
     return;
   }
   if (bilaxAdjacent()) {
-    gs.listenSafe = false;
+    gs.listenSafe = true;
     const dirs = Object.entries(rooms[gs.room].exits)
       .filter(([, v]) => v === gs.bilax)
       .map(([k]) => k.toUpperCase());
@@ -821,9 +821,8 @@ function dispatch(raw) {
     }
     const movedCmds = new Set(["go","move","walk","run","north","n","south","s","east","e","west","w","up","u","down","d"]);
     const forbidRoom = movedCmds.has(cmd) ? gs.room : null;
-    // When the player got a clean "somewhere else" listen, Bilax doesn't advance that turn —
-    // the information stays accurate so the player can act on it safely.
-    if (cmd === "listen" && gs.listenSafe) {
+    // On any listen, Bilax doesn't move — info stays accurate and next move destination is safe.
+    if (cmd === "listen") {
       // Just check if Bilax is already here (don't move him)
       checkBilaxEncounter(false);
     } else {
