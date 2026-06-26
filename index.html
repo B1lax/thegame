@@ -348,21 +348,23 @@ function bilaxNeighbors() {
 }
 
 function moveBilax(extraForbidden = null) {
-  // Bilax cannot move into: the listenSafe room, or any extra forbidden room (e.g. room player just entered)
-  const forbidden = extraForbidden || (gs.listenSafe ? gs.room : null);
+  // Collect all rooms Bilax must not enter this turn
+  const forbidSet = new Set();
+  if (extraForbidden) forbidSet.add(extraForbidden);
+  if (gs.listenSafe)  forbidSet.add(gs.room);  // room where player listened (or just entered while listenSafe)
+  gs.listenSafe = false;  // consume here so it applies exactly once
+
   const prevRoom = gs.bilax;
 
   if (Math.random() < 0.55) {
-    const nbrs = bilaxNeighbors().filter(r => r !== forbidden);
-    if (nbrs.length) {
-      gs.bilax = nbrs[Math.floor(Math.random() * nbrs.length)];
-    }
-  } else if (forbidden && gs.bilax === gs.room) {
-    const elsewhere = bilaxNeighbors().filter(r => r !== forbidden);
+    const nbrs = bilaxNeighbors().filter(r => !forbidSet.has(r));
+    if (nbrs.length) gs.bilax = nbrs[Math.floor(Math.random() * nbrs.length)];
+  } else if (forbidSet.has(gs.bilax)) {
+    // Bilax is sitting in a forbidden room — push him out
+    const elsewhere = bilaxNeighbors().filter(r => !forbidSet.has(r));
     if (elsewhere.length) gs.bilax = elsewhere[Math.floor(Math.random() * elsewhere.length)];
   }
 
-  // Return true if Bilax moved INTO the player's current room this turn
   return prevRoom !== gs.bilax && gs.bilax === gs.room;
 }
 
@@ -551,7 +553,6 @@ function cmdGo(dir) {
 
   gs.room = dest;
   gs.hiding = false;
-  gs.listenSafe = false;
   gs.bilaxEntering = false;
   describeRoom(gs.room);
   return true;
@@ -816,8 +817,15 @@ function dispatch(raw) {
     }
     const movedCmds = new Set(["go","move","walk","run","north","n","south","s","east","e","west","w","up","u","down","d"]);
     const forbidRoom = movedCmds.has(cmd) ? gs.room : null;
-    const bilaxJustMoved = moveBilax(forbidRoom);
-    checkBilaxEncounter(bilaxJustMoved);
+    // When the player got a clean "somewhere else" listen, Bilax doesn't advance that turn —
+    // the information stays accurate so the player can act on it safely.
+    if (cmd === "listen" && gs.listenSafe) {
+      // Just check if Bilax is already here (don't move him)
+      checkBilaxEncounter(false);
+    } else {
+      const bilaxJustMoved = moveBilax(forbidRoom);
+      checkBilaxEncounter(bilaxJustMoved);
+    }
   }
 }
 
