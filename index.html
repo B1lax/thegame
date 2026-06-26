@@ -787,7 +787,7 @@ function dispatch(raw) {
   lineDelay = 30;
 
   switch (cmd) {
-    case "help":  case "?":           cmdHelp();         break;
+    case "help":  case "?":           cmdHelp(); gs.turn--; return;
     case "look":  case "l":           cmdLook();         break;
     case "search":                    cmdSearch();       break;
     case "examine": case "x":
