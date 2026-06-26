@@ -337,7 +337,7 @@ function newGame() {
     turn:          0,
     hideStreak:    0,      // consecutive HIDE commands; resets on any other action
     listenSafe:    false,  // true after any LISTEN — next move destination is forbidden for Bilax
-    bilaxEntering: false   // true = Bilax walked INTO player's room this turn; 1-turn grace
+    bilaxEntering: null    // room ID Bilax was entering (grace turn); null when inactive
   };
 }
 
@@ -458,20 +458,23 @@ function afterAction() { return true; }
 function checkBilaxEncounter(bilaxJustMoved) {
   // ── Resolve grace turn: Bilax entered last turn, player had one chance ─────
   if (gs.bilaxEntering) {
-    gs.bilaxEntering = false;
-    const result = checkEncounter();
-    if (result === "safe") {
-      // Bilax wandered out on his own — player is fine
+    const enteringRoom = gs.bilaxEntering;
+    gs.bilaxEntering = null;
+    if (gs.room !== enteringRoom) {
+      // Player fled — safe, Bilax stays wherever he ended up
       return true;
     }
+    // Force Bilax into the room regardless of what moveBilax did — the warning was real
+    gs.bilax = gs.room;
+    const result = checkEncounter();
     if (result === "hiding_safe") {
-      pr("Bilax looms over your hiding spot... and moves on.", "warn");
+      pr("Bilax steps inside... looms over your hiding spot... and moves on.", "warn");
       const elsewhere = bilaxNeighbors().filter(r => r !== gs.room);
       if (elsewhere.length) gs.bilax = elsewhere[Math.floor(Math.random() * elsewhere.length)];
       pr("You hear heavy footsteps recede.", "warn");
       return true;
     }
-    // Didn't hide or flee — caught
+    // Didn't hide — caught
     caught();
     return false;
   }
@@ -493,7 +496,7 @@ function checkBilaxEncounter(bilaxJustMoved) {
     if (bilaxJustMoved) {
       pr("A shape darkens the doorway. BILAX has entered the room.", "danger");
       pr("HIDE or FLEE — now!", "danger");
-      gs.bilaxEntering = true;
+      gs.bilaxEntering = gs.room;
       return true;
     }
     caught();
@@ -557,7 +560,7 @@ function cmdGo(dir) {
 
   gs.room = dest;
   gs.hiding = false;
-  gs.bilaxEntering = false;
+  gs.bilaxEntering = null;
   describeRoom(gs.room);
   return true;
 }
