@@ -335,6 +335,7 @@ function newGame() {
     gameWon:       false,
     bilax:         "hallway",
     turn:          0,
+    hideStreak:    0,      // consecutive HIDE commands; resets on any other action
     listenSafe:    false,  // true after LISTEN says "somewhere else" — next move guaranteed safe
     bilaxEntering: false   // true = Bilax walked INTO player's room this turn; 1-turn grace
   };
@@ -373,7 +374,11 @@ function bilaxAdjacent() {
 
 function checkEncounter() {
   if (gs.bilax !== gs.room) return "safe";
-  if (gs.hiding && Math.random() < 0.90) return "hiding_safe";
+  if (gs.hiding) {
+    const chances = [1.0, 0.80, 0.60, 0.50];
+    const prob = chances[Math.min(gs.hideStreak - 1, 3)];
+    if (Math.random() < prob) return "hiding_safe";
+  }
   return "caught";
 }
 
@@ -807,8 +812,12 @@ function dispatch(raw) {
   }
 
   if (!gs.gameOver && !gs.gameWon) {
-    // Expire last turn's hide UNLESS this turn's command was HIDE itself
-    if (cmd !== "hide") gs.hiding = false;
+    if (cmd === "hide") {
+      gs.hideStreak++;
+    } else {
+      gs.hideStreak = 0;
+      gs.hiding = false;
+    }
     const bilaxJustMoved = moveBilax();
     checkBilaxEncounter(bilaxJustMoved);
   }
