@@ -1,0 +1,717 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BILAX — Terminal Adventure</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: #080808;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      font-family: 'Courier New', Courier, monospace;
+      padding: 16px;
+    }
+
+    /* Outer monitor bezel */
+    .monitor {
+      background: #1c1c1e;
+      border-radius: 12px;
+      padding: 18px 18px 14px;
+      box-shadow:
+        0 0 0 2px #2a2a2c,
+        0 0 60px rgba(0, 200, 0, 0.08),
+        0 20px 60px rgba(0,0,0,0.8);
+      width: 760px;
+      max-width: 100%;
+    }
+
+    .monitor-top {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 12px;
+      padding: 0 2px;
+    }
+
+    .dot { width: 10px; height: 10px; border-radius: 50%; }
+    .dot-red   { background: #3a1010; }
+    .dot-yellow{ background: #2a2010; }
+    .dot-green { background: #103a10; }
+
+    .monitor-title {
+      margin-left: auto;
+      color: #2a3a2a;
+      font-size: 10px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+    }
+
+    /* CRT screen */
+    .screen {
+      background: #050d05;
+      border-radius: 4px;
+      border: 1px solid #0d1f0d;
+      box-shadow:
+        inset 0 0 80px rgba(0,0,0,0.6),
+        inset 0 0 20px rgba(0,40,0,0.4);
+      position: relative;
+      overflow: hidden;
+      height: 68vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Scanlines overlay */
+    .screen::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: repeating-linear-gradient(
+        to bottom,
+        transparent 0px,
+        transparent 3px,
+        rgba(0,0,0,0.12) 3px,
+        rgba(0,0,0,0.12) 4px
+      );
+      pointer-events: none;
+      z-index: 10;
+    }
+
+    .output-area {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px 20px 8px;
+      scrollbar-width: thin;
+      scrollbar-color: #1a3a1a transparent;
+    }
+
+    .output-area::-webkit-scrollbar { width: 4px; }
+    .output-area::-webkit-scrollbar-track { background: transparent; }
+    .output-area::-webkit-scrollbar-thumb { background: #1a3a1a; border-radius: 2px; }
+
+    .line {
+      color: #00cc44;
+      font-size: 13px;
+      line-height: 1.65;
+      white-space: pre-wrap;
+      text-shadow: 0 0 6px rgba(0, 200, 60, 0.4);
+      display: block;
+    }
+
+    .line.dim    { color: #006622; text-shadow: none; }
+    .line.system { color: #00aaff; text-shadow: 0 0 6px rgba(0,170,255,0.3); }
+    .line.warn   { color: #ccaa00; text-shadow: 0 0 6px rgba(204,170,0,0.35); }
+    .line.danger { color: #ff3333; text-shadow: 0 0 10px rgba(255,50,50,0.6); }
+    .line.echo   { color: #44ff88; opacity: 0.7; }
+    .line.title  { color: #00ff66; text-shadow: 0 0 12px rgba(0,255,100,0.5); }
+
+    /* Input row */
+    .input-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 10px 20px 12px;
+      border-top: 1px solid #0a1a0a;
+      background: #040c04;
+    }
+
+    .prompt {
+      color: #00cc44;
+      font-size: 13px;
+      text-shadow: 0 0 6px rgba(0,200,60,0.4);
+      white-space: nowrap;
+      user-select: none;
+    }
+
+    #cmdInput {
+      flex: 1;
+      background: transparent;
+      border: none;
+      outline: none;
+      color: #00ff66;
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 13px;
+      text-shadow: 0 0 6px rgba(0,255,100,0.45);
+      caret-color: #00ff66;
+    }
+
+    /* Blinking cursor */
+    @keyframes blink { 0%,49%{opacity:1} 50%,100%{opacity:0} }
+    #cmdInput:focus + .cursor { display: none; }
+    .cursor {
+      display: inline-block;
+      width: 8px;
+      height: 14px;
+      background: #00cc44;
+      animation: blink 1s step-end infinite;
+      vertical-align: middle;
+    }
+  </style>
+</head>
+<body>
+
+<div class="monitor">
+  <div class="monitor-top">
+    <div class="dot dot-red"></div>
+    <div class="dot dot-yellow"></div>
+    <div class="dot dot-green"></div>
+    <span class="monitor-title">TERMINAL v2.1</span>
+  </div>
+  <div class="screen">
+    <div class="output-area" id="outputArea">
+      <div id="output"></div>
+    </div>
+    <div class="input-row">
+      <span class="prompt">&gt;_&nbsp;</span>
+      <input id="cmdInput" type="text" autocomplete="off" spellcheck="false" autofocus>
+    </div>
+  </div>
+</div>
+
+<script>
+// ─── Room definitions ──────────────────────────────────────────────────────────
+
+const ROOM_DEFS = {
+  living_room: {
+    name: "Living Room",
+    desc: [
+      "A dim living room. A sagging sofa and coffee table cast long shadows.",
+      "Dust covers everything. The front door is to the WEST — your way out.",
+      "A dark hallway leads NORTH. The kitchen is to the EAST."
+    ],
+    exits: { west: "_front_door", north: "hallway", east: "kitchen" },
+    hiding: ["behind the sofa", "under the coffee table"],
+    startItems: [],
+    startHidden: []
+  },
+  hallway: {
+    name: "Dark Hallway",
+    desc: [
+      "A long hallway cuts through the house. Floorboards creak under your feet.",
+      "A coat closet sits ajar to one side. The living room is SOUTH,",
+      "the master bedroom is EAST, and stairs lead UP to the attic."
+    ],
+    exits: { south: "living_room", east: "master_bedroom", up: "attic" },
+    hiding: ["inside the coat closet"],
+    startItems: [],
+    startHidden: []
+  },
+  master_bedroom: {
+    name: "Master Bedroom",
+    desc: [
+      "A large bedroom with a king bed. Clothes are strewn across the floor.",
+      "Moonlight slants through torn curtains. A crumpled note sits on the nightstand.",
+      "The hallway is to the WEST."
+    ],
+    exits: { west: "hallway" },
+    hiding: ["under the bed", "inside the wardrobe"],
+    startItems: ["note"],
+    startHidden: []
+  },
+  attic: {
+    name: "Dusty Attic",
+    desc: [
+      "A cramped attic crammed with boxes, old furniture, and forgotten things.",
+      "Dust motes drift in pale shafts of moonlight. A flashlight sits atop an old trunk.",
+      "Stairs lead back DOWN to the hallway."
+    ],
+    exits: { down: "hallway" },
+    hiding: ["behind the old trunk"],
+    startItems: ["flashlight"],
+    startHidden: []
+  },
+  kitchen: {
+    name: "Kitchen",
+    desc: [
+      "A small kitchen. A cracked window lets in thin moonlight.",
+      "Dirty dishes are stacked in the sink. A drawer sits beside the stove.",
+      "The living room is WEST. A pantry door is NORTH."
+    ],
+    exits: { west: "living_room", north: "pantry" },
+    hiding: ["under the kitchen counter"],
+    startItems: ["key"],
+    startHidden: ["key"]  // revealed by searching drawer
+  },
+  pantry: {
+    name: "Pantry",
+    desc: [
+      "A narrow pantry lined with shelves of canned goods and dusty jars.",
+      "Something small skitters in the dark. The kitchen is SOUTH."
+    ],
+    exits: { south: "kitchen" },
+    hiding: ["squeezed behind the shelving"],
+    startItems: [],
+    startHidden: []
+  }
+};
+
+const ITEM_DESC = {
+  key:        'An old brass key. Tarnished but solid. It must fit the front door.',
+  flashlight: 'A compact flashlight. It clicks on with a reassuring beam.',
+  note:       'A crumpled note in shaky handwriting.'
+};
+
+// ─── State ────────────────────────────────────────────────────────────────────
+
+let rooms, gs;
+
+function buildRooms() {
+  const r = {};
+  for (const [id, def] of Object.entries(ROOM_DEFS)) {
+    r[id] = {
+      ...def,
+      items: [...def.startItems],
+      hidden: new Set(def.startHidden),
+      searched: false
+    };
+  }
+  return r;
+}
+
+function newGame() {
+  rooms = buildRooms();
+  gs = {
+    room:      "living_room",
+    inv:       [],
+    hiding:    false,
+    gameOver:  false,
+    gameWon:   false,
+    bilax:     "hallway",
+    turn:      0
+  };
+}
+
+// ─── Bilax movement ───────────────────────────────────────────────────────────
+
+function bilaxNeighbors() {
+  return Object.values(rooms[gs.bilax].exits).filter(d => !d.startsWith("_"));
+}
+
+function moveBilax() {
+  // 55% move randomly, 45% stay
+  if (Math.random() < 0.55) {
+    const nbrs = bilaxNeighbors();
+    if (nbrs.length) gs.bilax = nbrs[Math.floor(Math.random() * nbrs.length)];
+  }
+}
+
+function bilaxAdjacent() {
+  return Object.values(rooms[gs.room].exits)
+    .filter(d => !d.startsWith("_"))
+    .includes(gs.bilax);
+}
+
+function checkEncounter() {
+  if (gs.bilax !== gs.room) return "safe";
+  if (gs.hiding && Math.random() < 0.80) return "hiding_safe";
+  return "caught";
+}
+
+// ─── Output helpers ───────────────────────────────────────────────────────────
+
+const output = document.getElementById("output");
+const outputArea = document.getElementById("outputArea");
+
+function pr(text = "", cls = "") {
+  const el = document.createElement("span");
+  el.className = "line" + (cls ? " " + cls : "");
+  el.textContent = text + "\n";
+  output.appendChild(el);
+  outputArea.scrollTop = outputArea.scrollHeight;
+}
+
+function prBlank() { pr(); }
+
+function prRule() {
+  pr("─".repeat(52), "dim");
+}
+
+// ─── Room display ─────────────────────────────────────────────────────────────
+
+function visibleItems(roomId) {
+  const r = rooms[roomId];
+  return r.items.filter(i => !r.hidden.has(i));
+}
+
+function describeRoom(roomId) {
+  const r = rooms[roomId];
+  prBlank();
+  pr("[ " + r.name + " ]", "system");
+  for (const line of r.desc) pr(line);
+
+  const vis = visibleItems(roomId);
+  if (vis.length) pr("You see here: " + vis.join(", ") + ".", "warn");
+
+  if (r.hiding.length)
+    pr("You could hide " + r.hiding[0] + ".");
+
+  if (gs.bilax === roomId) {
+    pr("BILAX IS HERE — hide or run!", "danger");
+  } else if (bilaxAdjacent()) {
+    pr("You hear something moving nearby...", "warn");
+  }
+}
+
+// ─── Win / lose ───────────────────────────────────────────────────────────────
+
+function caught() {
+  prBlank();
+  pr("████████████████████████████████████████████", "danger");
+  pr("  BILAX FOUND YOU.                          ", "danger");
+  pr("████████████████████████████████████████████", "danger");
+  prBlank();
+  pr("A massive shape lurches from the dark. Pale eyes fix on you.");
+  pr("Bilax exhales a rattling breath — and lunges.");
+  prBlank();
+  pr("GAME OVER.  Type RESTART to try again.", "warn");
+  gs.gameOver = true;
+}
+
+function escaped() {
+  prBlank();
+  pr("╔══════════════════════════════════════════════╗", "title");
+  pr("║   YOU ESCAPED. BILAX NEVER CAUGHT YOU.      ║", "title");
+  pr("╚══════════════════════════════════════════════╝", "title");
+  prBlank();
+  pr("The brass key turns. The door swings open.");
+  pr("Cool night air rushes in. You slip outside and don't look back.");
+  prBlank();
+  pr("Congratulations!  Type RESTART to play again.", "system");
+  gs.gameWon = true;
+}
+
+// ─── Post-action Bilax check ─────────────────────────────────────────────────
+
+function afterAction() {
+  moveBilax();
+  const result = checkEncounter();
+  if (result === "caught") { caught(); return false; }
+  if (result === "hiding_safe") {
+    pr("Bilax shuffles through the room... you hold your breath...", "danger");
+    pr("He sniffs the air and moves on. That was close.", "warn");
+  }
+  return true;
+}
+
+// ─── Commands ────────────────────────────────────────────────────────────────
+
+function cmdHelp() {
+  prBlank();
+  pr("═══════════════════ COMMANDS ═══════════════════", "system");
+  pr("  LOOK  / L                  Examine your surroundings");
+  pr("  GO [dir]  or just  N S E W U D   Move in a direction");
+  pr("  SEARCH                     Search the room for hidden items");
+  pr("  EXAMINE [thing] / X [thing]  Inspect something closely");
+  pr("  TAKE [item]                Pick up an item");
+  pr("  INVENTORY / I              List carried items");
+  pr("  HIDE                       Conceal yourself (lasts one turn)");
+  pr("  LISTEN                     Listen for Bilax");
+  pr("  USE [item]                 Use an item");
+  pr("  READ [item]                Read something");
+  pr("  RESTART                    Start a new game");
+  pr("════════════════════════════════════════════════", "system");
+  prBlank();
+  pr("TIP: Bilax can't find you as easily if you HIDE first.");
+}
+
+function cmdLook() {
+  describeRoom(gs.room);
+}
+
+function cmdGo(dir) {
+  const dirMap = { n:"north", s:"south", e:"east", w:"west", u:"up", d:"down" };
+  const full = dirMap[dir] || dir;
+  if (!full) { pr("Go where?", "warn"); return; }
+
+  const exits = rooms[gs.room].exits;
+  const dest = exits[full];
+  if (!dest) { pr("You can't go that way.", "warn"); return; }
+
+  if (dest === "_front_door") {
+    if (gs.inv.includes("key")) {
+      escaped();
+    } else {
+      pr("The front door is locked. You need a key to open it.", "warn");
+    }
+    return;
+  }
+
+  gs.room = dest;
+  gs.hiding = false;
+
+  if (!afterAction()) return;
+  describeRoom(gs.room);
+}
+
+function cmdSearch() {
+  const r = rooms[gs.room];
+  if (r.searched) {
+    pr("You've already searched this room thoroughly.");
+    return;
+  }
+  r.searched = true;
+  pr("You carefully search the room...");
+
+  if (gs.room === "kitchen" && r.hidden.has("key")) {
+    r.hidden.delete("key");
+    prBlank();
+    pr("You pull open the stove drawer. Beneath a stack of takeout menus...", "warn");
+    pr("...a brass key! You leave it here for now.", "warn");
+  } else if (r.hidden.size > 0) {
+    const found = [...r.hidden];
+    r.hidden.clear();
+    pr("You found: " + found.join(", ") + ".", "warn");
+  } else {
+    pr("You don't find anything useful.");
+  }
+
+  if (!afterAction()) return;
+}
+
+function cmdExamine(target) {
+  if (!target || target === "room" || target === "around") {
+    describeRoom(gs.room);
+    return;
+  }
+
+  // Examine drawer specifically — works like search in kitchen
+  if ((target === "drawer" || target === "stove" || target === "kitchen drawer")) {
+    if (gs.room !== "kitchen") { pr("There's no drawer here.", "warn"); return; }
+    const r = rooms["kitchen"];
+    if (r.hidden.has("key")) {
+      r.hidden.delete("key");
+      r.searched = true;
+      pr("You ease open the drawer. Under some old menus you spot a brass key!", "warn");
+      if (!afterAction()) return;
+    } else if (r.searched) {
+      pr("The drawer is empty — you already found what was inside.");
+    } else {
+      pr("A junk drawer. Nothing useful.");
+    }
+    return;
+  }
+
+  // Examine item in inventory or room
+  if (gs.inv.includes(target)) { pr(ITEM_DESC[target] || "It's a " + target + "."); return; }
+  const vis = visibleItems(gs.room);
+  if (vis.includes(target)) { pr(ITEM_DESC[target] || "It's a " + target + "."); return; }
+
+  // Scenery
+  const scenery = {
+    sofa: "A dusty sofa. You could squeeze behind it to hide.",
+    couch: "A dusty sofa. You could squeeze behind it to hide.",
+    door: "A heavy wooden front door. The lock looks solid — you need a key.",
+    "front door": "A heavy wooden front door. The lock looks solid — you need a key.",
+    window: "Cracked glass. Moonlight falls through in pale strips.",
+    bed: "A rumpled king bed. You could slide under it to hide.",
+    trunk: "An old wooden trunk. Large enough to crouch behind.",
+    sink: "A pile of dirty dishes. Try not to knock anything over.",
+    dishes: "Stacked dirty dishes. Would make a terrible noise if disturbed.",
+    closet: "A coat closet, door ajar. Room enough to squeeze inside.",
+    wardrobe: "A tall wardrobe. You could hide inside and pull the door shut.",
+    shelves: "Metal shelving loaded with cans. You could wedge yourself behind.",
+    boxes: "Cardboard boxes stacked nearly to the ceiling.",
+    nightstand: "A dusty nightstand. A crumpled note rests on top.",
+    note: ITEM_DESC["note"] + " It reads: \"I left the spare key in the kitchen DRAWER. -M\"",
+    curtains: "Torn curtains. Moonlight bleeds through.",
+    window: "The window is painted shut. Not an exit.",
+  };
+
+  const s = scenery[target];
+  if (s) { pr(s); return; }
+
+  pr("You don't see anything special about that.", "warn");
+}
+
+function cmdTake(item) {
+  if (!item) { pr("Take what?", "warn"); return; }
+
+  const r = rooms[gs.room];
+  const vis = visibleItems(gs.room);
+
+  if (!r.items.includes(item)) {
+    pr("There's no " + item + " here.", "warn");
+    return;
+  }
+  if (r.hidden.has(item)) {
+    pr("You'll have to find it first. Try SEARCH or EXAMINE something.", "warn");
+    return;
+  }
+
+  r.items = r.items.filter(i => i !== item);
+  gs.inv.push(item);
+  pr("You pick up the " + item + ".");
+
+  if (!afterAction()) return;
+}
+
+function cmdInventory() {
+  if (!gs.inv.length) pr("You're not carrying anything.");
+  else pr("You're carrying: " + gs.inv.join(", ") + ".");
+}
+
+function cmdHide() {
+  const r = rooms[gs.room];
+  const spot = r.hiding[Math.floor(Math.random() * r.hiding.length)];
+  gs.hiding = true;
+  pr("You slip " + spot + " and hold perfectly still.");
+  pr("(You're hidden this turn. Any action will make you visible again.)");
+}
+
+function cmdListen() {
+  if (gs.bilax === gs.room) {
+    pr("Bilax is IN THIS ROOM. Don't move — hide!", "danger");
+    return;
+  }
+  if (bilaxAdjacent()) {
+    const dirs = Object.entries(rooms[gs.room].exits)
+      .filter(([, v]) => v === gs.bilax)
+      .map(([k]) => k.toUpperCase());
+    pr("Heavy footsteps... Bilax is very close. Possibly to the " + (dirs[0] || "nearby") + ".", "warn");
+  } else {
+    pr("The house is quiet. Bilax doesn't seem to be nearby.");
+  }
+}
+
+function cmdUse(item) {
+  if (!item) { pr("Use what?", "warn"); return; }
+  if (!gs.inv.includes(item)) { pr("You don't have a " + item + ".", "warn"); return; }
+
+  if (item === "key") {
+    if (gs.room === "living_room") pr("The front door is WEST. Go WEST to use the key.");
+    else pr("There's no lock to use the key on here.");
+    return;
+  }
+  if (item === "flashlight") {
+    pr("You click the flashlight on. The beam sweeps the room.");
+    pr("(The flashlight is on whenever you carry it.)");
+    return;
+  }
+  pr("Not sure how to use that right now.", "warn");
+}
+
+function cmdRead(item) {
+  if (!item) { pr("Read what?", "warn"); return; }
+  if (item === "note") {
+    const inInv = gs.inv.includes("note");
+    const inRoom = visibleItems(gs.room).includes("note");
+    if (!inInv && !inRoom) { pr("You don't have a note to read.", "warn"); return; }
+    prBlank();
+    pr('The note reads:', "system");
+    pr('  "I left the spare key in the kitchen DRAWER.');
+    pr('   Don\'t let Bilax hear you rummaging around. —M"');
+    prBlank();
+    return;
+  }
+  pr("You can't read that.", "warn");
+}
+
+// ─── Input handling ───────────────────────────────────────────────────────────
+
+const cmdInput = document.getElementById("cmdInput");
+const history  = [];
+let histIdx    = -1;
+
+function dispatch(raw) {
+  const input = raw.trim().toLowerCase();
+  if (!input) return;
+
+  pr("> " + raw, "echo");
+
+  if (gs.gameOver || gs.gameWon) {
+    if (input === "restart" || input === "r") { startGame(); return; }
+    pr("Type RESTART to play again.", "warn");
+    return;
+  }
+
+  const [cmd, ...rest] = input.split(/\s+/);
+  const args = rest.join(" ");
+  gs.hiding = false;  // reset hiding on each action (set again by HIDE cmd)
+  gs.turn++;
+
+  switch (cmd) {
+    case "help":  case "?":           cmdHelp();         break;
+    case "look":  case "l":           cmdLook();         break;
+    case "search":                    cmdSearch();       break;
+    case "examine": case "x":
+    case "inspect": case "look at":   cmdExamine(args);  break;
+    case "take":  case "get":
+    case "grab":  case "pick":        cmdTake(args);     break;
+    case "inventory": case "inv":
+    case "i":                         cmdInventory();    break;
+    case "hide":                      cmdHide();         break;
+    case "listen":                    cmdListen();       break;
+    case "use":                       cmdUse(args);      break;
+    case "read":                      cmdRead(args);     break;
+    case "restart":                   startGame();       return;
+    case "go":    case "move":
+    case "walk":  case "run":         cmdGo(args);       break;
+    case "north": case "n":           cmdGo("north");    break;
+    case "south": case "s":           cmdGo("south");    break;
+    case "east":  case "e":           cmdGo("east");     break;
+    case "west":  case "w":           cmdGo("west");     break;
+    case "up":    case "u":           cmdGo("up");       break;
+    case "down":  case "d":           cmdGo("down");     break;
+    default:
+      pr("Unknown command. Type HELP for a list of commands.", "warn");
+      gs.turn--;
+  }
+}
+
+cmdInput.addEventListener("keydown", e => {
+  if (e.key === "Enter") {
+    const val = cmdInput.value;
+    if (val.trim()) { history.unshift(val); if (history.length > 80) history.pop(); }
+    histIdx = -1;
+    cmdInput.value = "";
+    dispatch(val);
+  } else if (e.key === "ArrowUp") {
+    e.preventDefault();
+    if (histIdx < history.length - 1) cmdInput.value = history[++histIdx];
+  } else if (e.key === "ArrowDown") {
+    e.preventDefault();
+    if (histIdx > 0) { cmdInput.value = history[--histIdx]; }
+    else { histIdx = -1; cmdInput.value = ""; }
+  }
+});
+
+document.addEventListener("click", () => cmdInput.focus());
+
+// ─── Boot sequence ────────────────────────────────────────────────────────────
+
+function printIntro() {
+  pr("╔══════════════════════════════════════════════════╗", "title");
+  pr("║                                                  ║", "title");
+  pr("║   B  I  L  A  X  —  A Terminal Adventure        ║", "title");
+  pr("║                                                  ║", "title");
+  pr("╚══════════════════════════════════════════════════╝", "title");
+  prBlank();
+  pr("You open your eyes in a dark house that isn't yours.", "warn");
+  pr("Something is in here with you. Something called BILAX.");
+  prBlank();
+  pr("Your goal:  find a key and unlock the front door to escape.");
+  pr("            Bilax hunts by sound. Be careful what you do.");
+  prBlank();
+  pr("Type  HELP  to see all commands.", "system");
+  pr("Type  LOOK  to examine your surroundings.", "system");
+  prBlank();
+  prRule();
+}
+
+function startGame() {
+  output.innerHTML = "";
+  newGame();
+  printIntro();
+  describeRoom(gs.room);
+}
+
+startGame();
+</script>
+</body>
+</html>
