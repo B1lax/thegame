@@ -263,14 +263,18 @@ const ROOM_DEFS = {
   },
   attic: {
     name: "Dusty Attic",
+    dark: true,   // pitch black without the flashlight
     desc: [
       "A cramped attic crammed with boxes, old furniture, and forgotten things.",
-      "Dust motes drift in pale shafts of moonlight. A flashlight sits atop an old trunk.",
-      "Stairs lead back DOWN to the hallway."
+      "An old trunk sits somewhere in the dark. Stairs lead back DOWN to the hallway."
+    ],
+    descDark: [
+      "Total darkness. You can't see a thing up here.",
+      "You can feel the stairs behind you leading back DOWN."
     ],
     exits: { down: "hallway" },
     hiding: ["behind the old trunk"],
-    startItems: ["flashlight"],
+    startItems: [],
     startHidden: []
   },
   kitchen: {
@@ -282,8 +286,8 @@ const ROOM_DEFS = {
     ],
     exits: { west: "living_room", north: "pantry" },
     hiding: ["under the kitchen counter"],
-    startItems: ["key"],
-    startHidden: ["key"]  // revealed by searching drawer
+    startItems: ["flashlight"],
+    startHidden: ["flashlight"]  // revealed by searching / examining drawer
   },
   pantry: {
     name: "Pantry",
@@ -324,13 +328,15 @@ function buildRooms() {
 function newGame() {
   rooms = buildRooms();
   gs = {
-    room:      "living_room",
-    inv:       [],
-    hiding:    false,
-    gameOver:  false,
-    gameWon:   false,
-    bilax:     "hallway",
-    turn:      0
+    room:          "living_room",
+    inv:           [],
+    hiding:        false,
+    gameOver:      false,
+    gameWon:       false,
+    bilax:         "hallway",
+    turn:          0,
+    listenSafe:    false,  // true after LISTEN says "somewhere else" — next move guaranteed safe
+    bilaxEntering: false   // true = Bilax walked INTO player's room this turn; 1-turn grace
   };
 }
 
@@ -341,11 +347,22 @@ function bilaxNeighbors() {
 }
 
 function moveBilax() {
-  // 55% move randomly, 45% stay
+  // If player just got a clean LISTEN, keep Bilax out of the player's current room
+  const forbidden = gs.listenSafe ? gs.room : null;
+  const prevRoom = gs.bilax;
+
   if (Math.random() < 0.55) {
-    const nbrs = bilaxNeighbors();
-    if (nbrs.length) gs.bilax = nbrs[Math.floor(Math.random() * nbrs.length)];
+    const nbrs = bilaxNeighbors().filter(r => r !== forbidden);
+    if (nbrs.length) {
+      gs.bilax = nbrs[Math.floor(Math.random() * nbrs.length)];
+    }
+  } else if (forbidden && gs.bilax === gs.room) {
+    const elsewhere = bilaxNeighbors().filter(r => r !== forbidden);
+    if (elsewhere.length) gs.bilax = elsewhere[Math.floor(Math.random() * elsewhere.length)];
   }
+
+  // Return true if Bilax moved INTO the player's current room this turn
+  return prevRoom !== gs.bilax && gs.bilax === gs.room;
 }
 
 function bilaxAdjacent() {
@@ -367,10 +384,25 @@ function visibleItems(roomId) {
   return r.items.filter(i => !r.hidden.has(i));
 }
 
+function hasLight() {
+  return gs.inv.includes("flashlight");
+}
+
+function isRoomDark(roomId) {
+  return !!rooms[roomId].dark && !hasLight();
+}
+
 function describeRoom(roomId) {
   const r = rooms[roomId];
   prBlank();
   pr("[ " + r.name + " ]", "system");
+
+  if (isRoomDark(roomId)) {
+    for (const line of r.descDark) pr(line, "dim");
+    if (gs.bilax === roomId) pr("Something is in here with you...", "danger");
+    return;
+  }
+
   for (const line of r.desc) pr(line);
 
   const vis = visibleItems(roomId);
@@ -413,18 +445,51 @@ function escaped() {
 }
 
 // ─── Post-action Bilax check ─────────────────────────────────────────────────
-// All Bilax movement and encounter checking is centralised in dispatch().
-// Individual commands do NOT call this — it's kept only as a safety no-op
-// in case anything still references it.
 function afterAction() { return true; }
 
-function checkBilaxEncounter() {
+function checkBilaxEncounter(bilaxJustMoved) {
+  // ── Resolve grace turn: Bilax entered last turn, player had one chance ─────
+  if (gs.bilaxEntering) {
+    gs.bilaxEntering = false;
+    const result = checkEncounter();
+    if (result === "hiding_safe") {
+      pr("Bilax looms over your hiding spot... and moves on.", "warn");
+      const elsewhere = bilaxNeighbors().filter(r => r !== gs.room);
+      if (elsewhere.length) gs.bilax = elsewhere[Math.floor(Math.random() * elsewhere.length)];
+      else gs.bilax = bilaxNeighbors()[0] || gs.bilax;
+      pr("You hear heavy footsteps recede toward the " + rooms[gs.bilax].name + ".", "warn");
+      return true;
+    }
+    // Didn't hide or flee — caught
+    caught();
+    return false;
+  }
+
+  // ── Normal encounter check ─────────────────────────────────────────────────
   const result = checkEncounter();
-  if (result === "caught") { caught(); return false; }
+
   if (result === "hiding_safe") {
     pr("Bilax enters the room... you press yourself flat and hold your breath...", "danger");
-    pr("He sniffs the air and shuffles on. That was too close.", "warn");
+    pr("He sniffs the air and shuffles on.", "warn");
+    const elsewhere = bilaxNeighbors().filter(r => r !== gs.room);
+    if (elsewhere.length) gs.bilax = elsewhere[Math.floor(Math.random() * elsewhere.length)];
+    else gs.bilax = bilaxNeighbors()[0] || gs.bilax;
+    pr("You hear heavy footsteps recede toward the " + rooms[gs.bilax].name + ".", "warn");
+    return true;
   }
+
+  if (result === "caught") {
+    // Only grant grace if Bilax walked in this turn (not if player is already sharing a room)
+    if (bilaxJustMoved) {
+      pr("A shape darkens the doorway. BILAX has entered the room.", "danger");
+      pr("HIDE or FLEE — now!", "danger");
+      gs.bilaxEntering = true;
+      return true;
+    }
+    caught();
+    return false;
+  }
+
   return true;
 }
 
@@ -471,12 +536,26 @@ function cmdGo(dir) {
     return;
   }
 
+  // Player walked into Bilax's room — instant death
+  if (gs.bilax === dest) {
+    gs.room = dest;
+    pr("You step into the " + rooms[dest].name + " — Bilax is right there.", "danger");
+    caught();
+    return;
+  }
+
   gs.room = dest;
   gs.hiding = false;
+  gs.listenSafe = false;
+  gs.bilaxEntering = false;
   describeRoom(gs.room);
 }
 
 function cmdSearch() {
+  if (isRoomDark(gs.room)) {
+    pr("It's too dark to search. You need a light source.", "warn");
+    return;
+  }
   const r = rooms[gs.room];
   if (r.searched) {
     pr("You've already searched this room thoroughly.");
@@ -485,10 +564,15 @@ function cmdSearch() {
   r.searched = true;
   pr("You carefully search the room...");
 
-  if (gs.room === "kitchen" && r.hidden.has("key")) {
+  if (gs.room === "kitchen" && r.hidden.has("flashlight")) {
+    r.hidden.delete("flashlight");
+    prBlank();
+    pr("You rummage through the drawer beside the stove...", "warn");
+    pr("...a flashlight! You leave it here for now.", "warn");
+  } else if (gs.room === "attic" && r.hidden.has("key")) {
     r.hidden.delete("key");
     prBlank();
-    pr("You pull open the stove drawer. Beneath a stack of takeout menus...", "warn");
+    pr("You pry open the old trunk. Beneath a pile of dusty rags...", "warn");
     pr("...a brass key! You leave it here for now.", "warn");
   } else if (r.hidden.size > 0) {
     const found = [...r.hidden];
@@ -504,29 +588,46 @@ function cmdExamine(target) {
     describeRoom(gs.room);
     return;
   }
+  if (isRoomDark(gs.room)) {
+    pr("It's too dark to examine anything. You need a light source.", "warn");
+    return;
+  }
 
-  // Examine drawer specifically — works like search in kitchen
   if ((target === "drawer" || target === "stove" || target === "kitchen drawer")) {
     if (gs.room !== "kitchen") { pr("There's no drawer here.", "warn"); return; }
     const r = rooms["kitchen"];
-    if (r.hidden.has("key")) {
-      r.hidden.delete("key");
+    if (r.hidden.has("flashlight")) {
+      r.hidden.delete("flashlight");
       r.searched = true;
-      pr("You ease open the drawer. Under some old menus you spot a brass key!", "warn");
+      pr("You ease open the drawer. Under a pile of takeout menus — a flashlight!", "warn");
     } else if (r.searched) {
       pr("The drawer is empty — you already found what was inside.");
     } else {
-      pr("A junk drawer. Nothing useful.");
+      pr("A junk drawer full of takeout menus and batteries. Something might be buried in here.");
     }
     return;
   }
 
-  // Examine item in inventory or room
+  // Examine trunk in attic — reveals the key
+  if (target === "trunk") {
+    if (gs.room !== "attic") { pr("There's no trunk here.", "warn"); return; }
+    const r = rooms["attic"];
+    if (r.hidden.has("key")) {
+      r.hidden.delete("key");
+      r.searched = true;
+      pr("You pry open the old trunk. Under a pile of dusty rags — a brass key!", "warn");
+    } else if (r.searched) {
+      pr("The trunk is empty — you already found what was inside.");
+    } else {
+      pr("An old wooden trunk. It has a latch — something could be inside.");
+    }
+    return;
+  }
+
   if (gs.inv.includes(target)) { pr(ITEM_DESC[target] || "It's a " + target + "."); return; }
   const vis = visibleItems(gs.room);
   if (vis.includes(target)) { pr(ITEM_DESC[target] || "It's a " + target + "."); return; }
 
-  // Scenery
   const scenery = {
     sofa: "A dusty sofa. You could squeeze behind it to hide.",
     couch: "A dusty sofa. You could squeeze behind it to hide.",
@@ -534,7 +635,7 @@ function cmdExamine(target) {
     "front door": "A heavy wooden front door. The lock looks solid — you need a key.",
     window: "Cracked glass. Moonlight falls through in pale strips.",
     bed: "A rumpled king bed. You could slide under it to hide.",
-    trunk: "An old wooden trunk. Large enough to crouch behind.",
+    trunk: "An old wooden trunk. It has a latch — something could be inside.",
     sink: "A pile of dirty dishes. Try not to knock anything over.",
     dishes: "Stacked dirty dishes. Would make a terrible noise if disturbed.",
     closet: "A coat closet, door ajar. Room enough to squeeze inside.",
@@ -542,9 +643,8 @@ function cmdExamine(target) {
     shelves: "Metal shelving loaded with cans. You could wedge yourself behind.",
     boxes: "Cardboard boxes stacked nearly to the ceiling.",
     nightstand: "A dusty nightstand. A crumpled note rests on top.",
-    note: ITEM_DESC["note"] + " It reads: \"I left the spare key in the kitchen DRAWER. -M\"",
+    note: ITEM_DESC["note"] + " It reads: \"Flashlight in kitchen DRAWER. Key in attic TRUNK. -M\"",
     curtains: "Torn curtains. Moonlight bleeds through.",
-    window: "The window is painted shut. Not an exit.",
   };
 
   const s = scenery[target];
@@ -555,7 +655,10 @@ function cmdExamine(target) {
 
 function cmdTake(item) {
   if (!item) { pr("Take what?", "warn"); return; }
-
+  if (isRoomDark(gs.room)) {
+    pr("It's too dark to find anything. You need a light source.", "warn");
+    return;
+  }
   const r = rooms[gs.room];
   const vis = visibleItems(gs.room);
 
@@ -582,8 +685,11 @@ function cmdHide() {
   const r = rooms[gs.room];
   const spot = r.hiding[Math.floor(Math.random() * r.hiding.length)];
   gs.hiding = true;
-  pr("You slip " + spot + " and hold perfectly still.");
-  pr("(You're hidden this turn. Any action will make you visible again.)");
+  if (isRoomDark(gs.room)) {
+    pr("You feel your way " + spot + " and hold perfectly still.");
+  } else {
+    pr("You slip " + spot + " and hold perfectly still.");
+  }
 }
 
 function cmdListen() {
@@ -592,6 +698,7 @@ function cmdListen() {
     return;
   }
   if (bilaxAdjacent()) {
+    gs.listenSafe = false;
     const dirs = Object.entries(rooms[gs.room].exits)
       .filter(([, v]) => v === gs.bilax)
       .map(([k]) => k.toUpperCase());
@@ -599,6 +706,7 @@ function cmdListen() {
     pr("You hear slow, heavy footsteps... Bilax is in the " + bilaxRoomName +
        " — just to the " + (dirs[0] || "nearby") + ".", "warn");
   } else {
+    gs.listenSafe = true;
     pr("You hold your breath and listen.");
     pr("Nothing. Bilax is somewhere else in the house.");
   }
@@ -629,8 +737,9 @@ function cmdRead(item) {
     if (!inInv && !inRoom) { pr("You don't have a note to read.", "warn"); return; }
     prBlank();
     pr('The note reads:', "system");
-    pr('  "I left the spare key in the kitchen DRAWER.');
-    pr('   Don\'t let Bilax hear you rummaging around. —M"');
+    pr('  "Flashlight is in the kitchen DRAWER.');
+    pr('   Spare key is in the attic TRUNK — it\'s pitch black up there.');
+    pr('   Don\'t let Bilax hear you. —M"');
     prBlank();
     return;
   }
@@ -642,13 +751,12 @@ function cmdRead(item) {
 const cmdInput = document.getElementById("cmdInput");
 const history  = [];
 let histIdx    = -1;
-let booted     = false;   // true after the player first presses Enter
+let booted     = false;
 
 function dispatch(raw) {
   const input = raw.trim().toLowerCase();
   if (!input) return;
 
-  // Flush any still-printing text so the echo appears at the right place
   flushQueue();
 
   pr("> " + raw, "echo");
@@ -661,10 +769,9 @@ function dispatch(raw) {
 
   const [cmd, ...rest] = input.split(/\s+/);
   const args = rest.join(" ");
-  gs.hiding = false;
   gs.turn++;
 
-  lineDelay = 30;  // gameplay lines roll faster than intro
+  lineDelay = 30;
 
   switch (cmd) {
     case "help":  case "?":           cmdHelp();         break;
@@ -692,19 +799,19 @@ function dispatch(raw) {
     default:
       pr("Unknown command. Type HELP for a list of commands.", "warn");
       gs.turn--;
-      return;  // invalid — Bilax doesn't move
+      return;
   }
 
-  // Every valid command: Bilax moves once, then we check for an encounter.
   if (!gs.gameOver && !gs.gameWon) {
-    moveBilax();
-    checkBilaxEncounter();
+    // Expire last turn's hide UNLESS this turn's command was HIDE itself
+    if (cmd !== "hide") gs.hiding = false;
+    const bilaxJustMoved = moveBilax();
+    checkBilaxEncounter(bilaxJustMoved);
   }
 }
 
 cmdInput.addEventListener("keydown", e => {
   if (e.key === "Enter") {
-    // ── Boot gate ──────────────────────────────────────────
     if (!booted) {
       booted = true;
       cmdInput.placeholder = "";
@@ -713,13 +820,11 @@ cmdInput.addEventListener("keydown", e => {
       return;
     }
 
-    // ── If text is still rolling, flush it instantly ───────
     if (queueRunning) {
       flushQueue();
       return;
     }
 
-    // ── Normal command dispatch ────────────────────────────
     const val = cmdInput.value;
     if (val.trim()) { history.unshift(val); if (history.length > 80) history.pop(); }
     histIdx = -1;
@@ -769,7 +874,6 @@ function startGame() {
   describeRoom(gs.room);
 }
 
-// ── On page load: blank screen, wait for Enter ────────────────────────────────
 cmdInput.placeholder = "PRESS  ENTER  TO  BEGIN";
 cmdInput.focus();
 </script>
