@@ -373,7 +373,7 @@ function bilaxAdjacent() {
 
 function checkEncounter() {
   if (gs.bilax !== gs.room) return "safe";
-  if (gs.hiding && Math.random() < 0.80) return "hiding_safe";
+  if (gs.hiding && Math.random() < 0.90) return "hiding_safe";
   return "caught";
 }
 
@@ -452,6 +452,10 @@ function checkBilaxEncounter(bilaxJustMoved) {
   if (gs.bilaxEntering) {
     gs.bilaxEntering = false;
     const result = checkEncounter();
+    if (result === "safe") {
+      // Bilax wandered out on his own — player is fine
+      return true;
+    }
     if (result === "hiding_safe") {
       pr("Bilax looms over your hiding spot... and moves on.", "warn");
       const elsewhere = bilaxNeighbors().filter(r => r !== gs.room);
