@@ -381,8 +381,6 @@ function describeRoom(roomId) {
 
   if (gs.bilax === roomId) {
     pr("BILAX IS HERE — hide or run!", "danger");
-  } else if (bilaxAdjacent()) {
-    pr("You hear something moving nearby...", "warn");
   }
 }
 
@@ -415,14 +413,17 @@ function escaped() {
 }
 
 // ─── Post-action Bilax check ─────────────────────────────────────────────────
+// All Bilax movement and encounter checking is centralised in dispatch().
+// Individual commands do NOT call this — it's kept only as a safety no-op
+// in case anything still references it.
+function afterAction() { return true; }
 
-function afterAction() {
-  moveBilax();
+function checkBilaxEncounter() {
   const result = checkEncounter();
   if (result === "caught") { caught(); return false; }
   if (result === "hiding_safe") {
-    pr("Bilax shuffles through the room... you hold your breath...", "danger");
-    pr("He sniffs the air and moves on. That was close.", "warn");
+    pr("Bilax enters the room... you press yourself flat and hold your breath...", "danger");
+    pr("He sniffs the air and shuffles on. That was too close.", "warn");
   }
   return true;
 }
@@ -472,8 +473,6 @@ function cmdGo(dir) {
 
   gs.room = dest;
   gs.hiding = false;
-
-  if (!afterAction()) return;
   describeRoom(gs.room);
 }
 
@@ -498,8 +497,6 @@ function cmdSearch() {
   } else {
     pr("You don't find anything useful.");
   }
-
-  if (!afterAction()) return;
 }
 
 function cmdExamine(target) {
@@ -516,7 +513,6 @@ function cmdExamine(target) {
       r.hidden.delete("key");
       r.searched = true;
       pr("You ease open the drawer. Under some old menus you spot a brass key!", "warn");
-      if (!afterAction()) return;
     } else if (r.searched) {
       pr("The drawer is empty — you already found what was inside.");
     } else {
@@ -575,8 +571,6 @@ function cmdTake(item) {
   r.items = r.items.filter(i => i !== item);
   gs.inv.push(item);
   pr("You pick up the " + item + ".");
-
-  if (!afterAction()) return;
 }
 
 function cmdInventory() {
@@ -594,16 +588,19 @@ function cmdHide() {
 
 function cmdListen() {
   if (gs.bilax === gs.room) {
-    pr("Bilax is IN THIS ROOM. Don't move — hide!", "danger");
+    pr("Bilax is IN THIS ROOM with you. Don't move — hide!", "danger");
     return;
   }
   if (bilaxAdjacent()) {
     const dirs = Object.entries(rooms[gs.room].exits)
       .filter(([, v]) => v === gs.bilax)
       .map(([k]) => k.toUpperCase());
-    pr("Heavy footsteps... Bilax is very close. Possibly to the " + (dirs[0] || "nearby") + ".", "warn");
+    const bilaxRoomName = rooms[gs.bilax].name;
+    pr("You hear slow, heavy footsteps... Bilax is in the " + bilaxRoomName +
+       " — just to the " + (dirs[0] || "nearby") + ".", "warn");
   } else {
-    pr("The house is quiet. Bilax doesn't seem to be nearby.");
+    pr("You hold your breath and listen.");
+    pr("Nothing. Bilax is somewhere else in the house.");
   }
 }
 
@@ -674,7 +671,7 @@ function dispatch(raw) {
     case "look":  case "l":           cmdLook();         break;
     case "search":                    cmdSearch();       break;
     case "examine": case "x":
-    case "inspect": case "look at":   cmdExamine(args);  break;
+    case "inspect":                   cmdExamine(args);  break;
     case "take":  case "get":
     case "grab":  case "pick":        cmdTake(args);     break;
     case "inventory": case "inv":
@@ -695,6 +692,13 @@ function dispatch(raw) {
     default:
       pr("Unknown command. Type HELP for a list of commands.", "warn");
       gs.turn--;
+      return;  // invalid — Bilax doesn't move
+  }
+
+  // Every valid command: Bilax moves once, then we check for an encounter.
+  if (!gs.gameOver && !gs.gameWon) {
+    moveBilax();
+    checkBilaxEncounter();
   }
 }
 
