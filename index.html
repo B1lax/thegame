@@ -547,14 +547,11 @@ function cmdGo(dir) {
     return true;
   }
 
-  // Player walked into Bilax's room — grace turn (player had no way to know)
+  // Player walked into Bilax's room — instant death
   if (gs.bilax === dest) {
     gs.room = dest;
-    gs.hiding = false;
-    gs.bilaxEntering = true;
-    pr("You step into the " + rooms[dest].name + " — BILAX IS RIGHT HERE.", "danger");
-    pr("HIDE or FLEE — now!", "danger");
-    describeRoom(gs.room);
+    pr("You step into the " + rooms[dest].name + " — Bilax is right there.", "danger");
+    caught();
     return true;
   }
 
